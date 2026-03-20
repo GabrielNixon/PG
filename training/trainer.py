@@ -4,7 +4,7 @@ import torch.optim as optim
 from data.synthetic import generate_synthetic_batch
 from models.mixture_model import HMMRNNMixture
 from models.posterior import compute_posteriors
-from training.losses import negative_log_likelihood
+from training.losses import expert_responsibility_loss
 
 
 def build_model(
@@ -21,6 +21,7 @@ def build_model(
     )
     return model
 
+
 def state_accuracy_with_label_flip(hard_pred: torch.Tensor, z_true: torch.Tensor):
     acc_direct = (hard_pred == z_true).float().mean().item()
     acc_flipped = ((1 - hard_pred) == z_true).float().mean().item()
@@ -33,16 +34,23 @@ def run_forward_pass_with_hmm(model, x, actions):
     emissions = model.get_emissions_for_actions(probs_list, actions)
 
     pi, A = model.hmm()
-    gamma, log_alpha, log_beta = compute_posteriors(pi, A, emissions)
+    gamma_prior, log_alpha, log_beta = compute_posteriors(pi, A, emissions)
 
-    mixed_probs = model.combine_with_posteriors(probs_list, gamma)
-    loss = negative_log_likelihood(mixed_probs, actions)
+    loss, posterior, chosen_probs = expert_responsibility_loss(
+        probs_list=probs_list,
+        gamma_prior=gamma_prior,
+        actions=actions
+    )
+
+    mixed_probs = model.combine_with_posteriors(probs_list, posterior)
 
     return {
         "loss": loss,
         "mixed_probs": mixed_probs,
-        "gamma": gamma,
+        "gamma_prior": gamma_prior,
+        "gamma": posterior,
         "emissions": emissions,
+        "chosen_probs": chosen_probs,
         "logits_list": logits_list,
         "probs_list": probs_list,
         "pi": pi,
@@ -98,12 +106,17 @@ def run_multi_step_training_with_hmm():
             avg_state_mass = gamma_pred.mean(dim=(0, 1))
             A = outputs["A"].detach()
 
+            probs_0 = outputs["probs_list"][0].detach()
+            probs_1 = outputs["probs_list"][1].detach()
+            expert_gap = (probs_0 - probs_1).abs().mean().item()
+
             print(
                 f"step {step:03d} | "
                 f"loss = {loss.item():.4f} | "
                 f"acc_direct = {acc_direct:.4f} | "
                 f"acc_flipped = {acc_flipped:.4f} | "
-                f"best_acc = {best_acc:.4f}"
+                f"best_acc = {best_acc:.4f} | "
+                f"expert_gap = {expert_gap:.4f}"
             )
             print("avg_state_mass:", avg_state_mass.tolist())
             print("A:")
