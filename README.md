@@ -110,6 +110,7 @@ pg/
 │   └── debug.py
 └── outputs/
     └── debug_plots/
+```
 
 ## Core Components
 
@@ -171,6 +172,8 @@ Debug mode includes explicit regime blocks:
 
 ```text
 0 → 1 → 0 → 1
+```
+
 Used to verify whether inferred responsibilities track true regimes.
 
 ---
